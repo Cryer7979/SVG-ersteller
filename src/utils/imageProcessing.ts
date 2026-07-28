@@ -54,10 +54,10 @@ export function offsetPolygon(points: Point[], offsetPixels: number): Point[] {
   return largestPath.map((p: {X: number, Y: number}) => ({ x: p.X / scale, y: p.Y / scale }));
 }
 
-export function detectContours(imageElement: HTMLImageElement, thresholdValue: number = 128): Point[] | null {
+export function detectContours(imageElement: HTMLImageElement, thresholdValue: number = 128, log: (msg: string) => void = console.log): Point[] | null {
   // @ts-ignore - cv is loaded globally from script tag
   if (typeof cv === 'undefined' || !cv.Mat) {
-    console.error("OpenCV not loaded yet");
+    log("Error: OpenCV not loaded yet");
     return null;
   }
 
@@ -67,24 +67,25 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
     // @ts-ignore
     const thresh = new cv.Mat();
 
-    // Check if image has an alpha channel
-    if (src.channels() === 4) {
-      // Create an array of Mats to hold the channels
-      // @ts-ignore
-      const rgbaPlanes = new cv.MatVector();
-      // @ts-ignore
-      cv.split(src, rgbaPlanes);
+    // Create an array of Mats to hold the channels
+    // @ts-ignore
+    const rgbaPlanes = new cv.MatVector();
+    // @ts-ignore
+    cv.split(src, rgbaPlanes);
+    const alpha = rgbaPlanes.get(3);
 
-      // Get the alpha channel
-      const alpha = rgbaPlanes.get(3);
+    // Check if the image has actual transparency
+    // @ts-ignore
+    const minMax = cv.minMaxLoc(alpha);
+    const hasTransparency = minMax.minVal < 255;
 
+    if (hasTransparency) {
+      log(`Detected transparency (min alpha: ${minMax.minVal}). Using alpha channel for thresholding.`);
       // Threshold the alpha channel (0 is transparent, >0 is opaque)
       // @ts-ignore
       cv.threshold(alpha, thresh, thresholdValue > 0 ? thresholdValue : 1, 255, cv.THRESH_BINARY);
-
-      alpha.delete();
-      rgbaPlanes.delete();
     } else {
+      log(`No transparency detected (min alpha: ${minMax.minVal}). Falling back to grayscale background thresholding.`);
       // @ts-ignore
       const gray = new cv.Mat();
       // @ts-ignore
@@ -92,19 +93,25 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
 
       // Try to determine the background color (assume it's the corner pixel)
       const bgPixel = gray.ucharPtr(0, 0)[0];
+      log(`Detected background color (corner pixel): ${bgPixel}`);
 
       // Thresholding
       if (bgPixel > 128) {
-        // Light background, invert it
+        // Light background, invert it (we want the object to be white in the mask)
+        log(`Using inverted thresholding (light background) with value: ${thresholdValue}`);
         // @ts-ignore
         cv.threshold(gray, thresh, thresholdValue, 255, cv.THRESH_BINARY_INV);
       } else {
         // Dark background
+        log(`Using normal thresholding (dark background) with value: ${thresholdValue}`);
         // @ts-ignore
         cv.threshold(gray, thresh, thresholdValue, 255, cv.THRESH_BINARY);
       }
       gray.delete();
     }
+
+    alpha.delete();
+    rgbaPlanes.delete();
 
     // Apply morphological operations to close small gaps and smooth edges
     // @ts-ignore
@@ -121,7 +128,10 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
     // @ts-ignore
     cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
+    log(`Found ${contours.size()} raw contours.`);
+
     if (contours.size() === 0) {
+       log("Error: No contours found after thresholding.");
        src.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
        return null;
     }
@@ -139,6 +149,7 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
 
       // If the area is practically the whole image, it's probably the boundary
       if (area > imageArea * 0.95) {
+        log(`Ignoring contour ${i} due to large area (boundary): ${area}`);
         contour.delete();
         continue;
       }
@@ -151,10 +162,12 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
     }
 
     if (largestContourIdx === -1) {
+       log("Error: Could not find a valid contour after filtering out boundaries.");
        src.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
        return null;
     }
 
+    log(`Selected contour ${largestContourIdx} with area: ${maxArea}`);
     const largestContour = contours.get(largestContourIdx);
 
     // Extract points
@@ -172,10 +185,12 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
     largestContour.delete();
 
     // Simplify the contour to a manageable number of points
-    return simplifyPoints(points);
+    const finalPoints = simplifyPoints(points);
+    log(`Successfully generated path with ${finalPoints.length} points.`);
+    return finalPoints;
 
   } catch (err) {
-    console.error("Error in contour detection:", err);
+    log(`Fatal Error in contour detection: ${err}`);
     return null;
   }
 }

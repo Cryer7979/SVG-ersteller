@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, type MouseEvent } from 'react';
-import { Upload, Download, Settings, Layers, Box, Pointer, Trash2 } from 'lucide-react';
+import { Upload, Download, Settings, Layers, Box, Pointer, Trash2, Bug } from 'lucide-react';
 import { type Point, detectContours, offsetPolygon } from './utils/imageProcessing';
 import { getSmoothPath } from './utils/splineUtils';
 import { Preview3D } from './components/Preview3D';
@@ -16,6 +16,9 @@ export function App() {
   const [sensitivity, setSensitivity] = useState(128);
   const [offsetAmount, setOffsetAmount] = useState(5);
   const [thickness, setThickness] = useState(3.0);
+
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
 
   const imageRef = useRef<HTMLImageElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -110,15 +113,23 @@ export function App() {
 
   const autoDetect = () => {
     if (!imageRef.current) return;
-    const detectedPoints = detectContours(imageRef.current, sensitivity);
+    setDebugLogs([]); // Clear old logs
+    const addLog = (msg: string) => setDebugLogs(prev => [...prev, msg]);
+
+    addLog(`Starting auto-detect with sensitivity: ${sensitivity}, offset: ${offsetAmount}`);
+
+    const detectedPoints = detectContours(imageRef.current, sensitivity, addLog);
     if (detectedPoints) {
        let finalPoints = detectedPoints;
        if (offsetAmount > 0) {
            finalPoints = offsetPolygon(finalPoints, offsetAmount);
+           addLog(`Applied offset of ${offsetAmount}px`);
        }
        setPoints(finalPoints);
+       addLog("Detection complete.");
     } else {
-       alert("No outline detected. Try adjusting sensitivity.");
+       addLog("Detection failed.");
+       alert("No outline detected. Check debug panel for details.");
     }
   };
 
@@ -224,6 +235,13 @@ export function App() {
         <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6 justify-between shadow-sm z-10">
            <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
              <button
+               onClick={() => setShowDebug(!showDebug)}
+               className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${showDebug ? 'bg-amber-100 text-amber-700' : 'text-gray-500 hover:text-gray-900'}`}
+               title="Toggle Debug Panel"
+             >
+               <Bug className="w-4 h-4" />
+             </button>
+             <button
                onClick={() => setActiveTab('2d')}
                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === '2d' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
              >
@@ -310,6 +328,25 @@ export function App() {
                 ) : (
                    <p className="text-gray-500">Upload an image first.</p>
                 )}
+             </div>
+           )}
+
+           {/* Debug Panel */}
+           {showDebug && (
+             <div className="absolute bottom-4 right-4 w-96 bg-gray-900 text-green-400 p-4 rounded-lg shadow-2xl font-mono text-xs overflow-hidden flex flex-col z-50 border border-gray-700" style={{maxHeight: '40vh'}}>
+               <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-700">
+                 <h3 className="font-bold text-gray-100">Debug Console</h3>
+                 <button onClick={() => setShowDebug(false)} className="text-gray-400 hover:text-white">✕</button>
+               </div>
+               <div className="flex-1 overflow-y-auto space-y-1">
+                 {debugLogs.length === 0 ? (
+                   <span className="text-gray-500">No logs yet. Run auto-detect...</span>
+                 ) : (
+                   debugLogs.map((log, i) => (
+                     <div key={i}>{log}</div>
+                   ))
+                 )}
+               </div>
              </div>
            )}
         </div>
