@@ -65,15 +65,53 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
     // @ts-ignore
     const src = cv.imread(imageElement);
     // @ts-ignore
-    const gray = new cv.Mat();
-    // @ts-ignore
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-
-    // Thresholding
-    // @ts-ignore
     const thresh = new cv.Mat();
+
+    // Check if image has an alpha channel
+    if (src.channels() === 4) {
+      // Create an array of Mats to hold the channels
+      // @ts-ignore
+      const rgbaPlanes = new cv.MatVector();
+      // @ts-ignore
+      cv.split(src, rgbaPlanes);
+
+      // Get the alpha channel
+      const alpha = rgbaPlanes.get(3);
+
+      // Threshold the alpha channel (0 is transparent, >0 is opaque)
+      // @ts-ignore
+      cv.threshold(alpha, thresh, thresholdValue > 0 ? thresholdValue : 1, 255, cv.THRESH_BINARY);
+
+      alpha.delete();
+      rgbaPlanes.delete();
+    } else {
+      // @ts-ignore
+      const gray = new cv.Mat();
+      // @ts-ignore
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+
+      // Try to determine the background color (assume it's the corner pixel)
+      const bgPixel = gray.ucharPtr(0, 0)[0];
+
+      // Thresholding
+      if (bgPixel > 128) {
+        // Light background, invert it
+        // @ts-ignore
+        cv.threshold(gray, thresh, thresholdValue, 255, cv.THRESH_BINARY_INV);
+      } else {
+        // Dark background
+        // @ts-ignore
+        cv.threshold(gray, thresh, thresholdValue, 255, cv.THRESH_BINARY);
+      }
+      gray.delete();
+    }
+
+    // Apply morphological operations to close small gaps and smooth edges
     // @ts-ignore
-    cv.threshold(gray, thresh, thresholdValue, 255, cv.THRESH_BINARY_INV | cv.THRESH_OTSU);
+    const M = cv.Mat.ones(5, 5, cv.CV_8U);
+    // @ts-ignore
+    cv.morphologyEx(thresh, thresh, cv.MORPH_CLOSE, M);
+    M.delete();
 
     // Find contours
     // @ts-ignore
@@ -84,22 +122,37 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
     cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
     if (contours.size() === 0) {
-       src.delete(); gray.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
+       src.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
        return null;
     }
 
-    // Find largest contour
-    let largestContourIdx = 0;
-    // @ts-ignore
-    let maxArea = cv.contourArea(contours.get(0));
+    // Find largest valid contour (ignoring the image boundary itself)
+    let largestContourIdx = -1;
+    let maxArea = 0;
 
-    for (let i = 1; i < contours.size(); i++) {
+    const imageArea = src.cols * src.rows;
+
+    for (let i = 0; i < contours.size(); i++) {
+      const contour = contours.get(i);
       // @ts-ignore
-      const area = cv.contourArea(contours.get(i));
+      const area = cv.contourArea(contour);
+
+      // If the area is practically the whole image, it's probably the boundary
+      if (area > imageArea * 0.95) {
+        contour.delete();
+        continue;
+      }
+
       if (area > maxArea) {
         maxArea = area;
         largestContourIdx = i;
       }
+      contour.delete();
+    }
+
+    if (largestContourIdx === -1) {
+       src.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
+       return null;
     }
 
     const largestContour = contours.get(largestContourIdx);
@@ -113,7 +166,6 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
 
     // Cleanup
     src.delete();
-    gray.delete();
     thresh.delete();
     contours.delete();
     hierarchy.delete();
