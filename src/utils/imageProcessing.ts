@@ -84,41 +84,50 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
       // Threshold the alpha channel (0 is transparent, >0 is opaque)
       // @ts-ignore
       cv.threshold(alpha, thresh, thresholdValue > 0 ? thresholdValue : 1, 255, cv.THRESH_BINARY);
+
+      // Apply morphological operations to close small gaps and smooth edges
+      // @ts-ignore
+      const M = cv.Mat.ones(5, 5, cv.CV_8U);
+      // @ts-ignore
+      cv.morphologyEx(thresh, thresh, cv.MORPH_CLOSE, M);
+      M.delete();
     } else {
-      log(`No transparency detected (min alpha: ${minMax.minVal}). Falling back to grayscale background thresholding.`);
+      log(`No transparency detected (min alpha: ${minMax.minVal}). Falling back to Canny Edge Detection.`);
       // @ts-ignore
       const gray = new cv.Mat();
       // @ts-ignore
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
 
-      // Try to determine the background color (assume it's the corner pixel)
-      const bgPixel = gray.ucharPtr(0, 0)[0];
-      log(`Detected background color (corner pixel): ${bgPixel}`);
+      // Blur to reduce noise
+      // @ts-ignore
+      const blurred = new cv.Mat();
+      // @ts-ignore
+      const ksize = new cv.Size(5, 5);
+      // @ts-ignore
+      cv.GaussianBlur(gray, blurred, ksize, 0, 0, cv.BORDER_DEFAULT);
 
-      // Thresholding
-      if (bgPixel > 128) {
-        // Light background, invert it (we want the object to be white in the mask)
-        log(`Using inverted thresholding (light background) with value: ${thresholdValue}`);
-        // @ts-ignore
-        cv.threshold(gray, thresh, thresholdValue, 255, cv.THRESH_BINARY_INV);
-      } else {
-        // Dark background
-        log(`Using normal thresholding (dark background) with value: ${thresholdValue}`);
-        // @ts-ignore
-        cv.threshold(gray, thresh, thresholdValue, 255, cv.THRESH_BINARY);
-      }
+      // Canny Edge Detection
+      // Map sensitivity (0-255) to Canny thresholds. Higher sensitivity = lower thresholds.
+      const highThresh = 255 - thresholdValue;
+      const lowThresh = highThresh * 0.5;
+      log(`Using Canny edge detection with thresholds: ${lowThresh.toFixed(1)} / ${highThresh.toFixed(1)}`);
+
+      // @ts-ignore
+      cv.Canny(blurred, thresh, lowThresh, highThresh, 3, false);
+
+      // Dilate edges to close loops so findContours works on the outer boundary
+      // @ts-ignore
+      const M = cv.Mat.ones(7, 7, cv.CV_8U);
+      // @ts-ignore
+      cv.dilate(thresh, thresh, M, new cv.Point(-1, -1), 2, cv.BORDER_CONSTANT, cv.morphologyDefaultBorderValue());
+
+      M.delete();
+      blurred.delete();
       gray.delete();
     }
 
     alpha.delete();
     rgbaPlanes.delete();
-
-    // Apply morphological operations to close small gaps and smooth edges
-    // @ts-ignore
-    const M = cv.Mat.ones(5, 5, cv.CV_8U);
-    // @ts-ignore
-    cv.morphologyEx(thresh, thresh, cv.MORPH_CLOSE, M);
-    M.delete();
 
     // Find contours
     // @ts-ignore
@@ -138,7 +147,7 @@ export function detectContours(imageElement: HTMLImageElement, thresholdValue: n
 
     // Find largest valid contour (ignoring the image boundary itself)
     let largestContourIdx = -1;
-    let maxArea = 0;
+    let maxArea = -1;
 
     const imageArea = src.cols * src.rows;
 
