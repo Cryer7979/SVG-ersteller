@@ -54,16 +54,33 @@ export function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const getRenderedImageRect = () => {
+    if (!imageRef.current || imageSize.width === 0 || imageSize.height === 0) {
+      return { x: 0, y: 0, width: displaySize.width, height: displaySize.height };
+    }
+    const img = imageRef.current;
+    const scale = Math.min(img.width / imageSize.width, img.height / imageSize.height);
+    const renderedWidth = imageSize.width * scale;
+    const renderedHeight = imageSize.height * scale;
+    const offsetX = (img.width - renderedWidth) / 2;
+    const offsetY = (img.height - renderedHeight) / 2;
+    return { x: offsetX, y: offsetY, width: renderedWidth, height: renderedHeight };
+  };
+
   const mapPointToImage = (x: number, y: number): Point => {
-    const scaleX = imageSize.width / displaySize.width;
-    const scaleY = imageSize.height / displaySize.height;
-    return { x: x * scaleX, y: y * scaleY };
+    const rect = getRenderedImageRect();
+    return {
+      x: ((x - rect.x) / rect.width) * imageSize.width,
+      y: ((y - rect.y) / rect.height) * imageSize.height
+    };
   };
 
   const mapPointToDisplay = (p: Point): Point => {
-    const scaleX = displaySize.width / imageSize.width;
-    const scaleY = displaySize.height / imageSize.height;
-    return { x: p.x * scaleX, y: p.y * scaleY };
+    const rect = getRenderedImageRect();
+    return {
+      x: (p.x / imageSize.width) * rect.width + rect.x,
+      y: (p.y / imageSize.height) * rect.height + rect.y
+    };
   };
 
   const handleSvgClick = (e: MouseEvent<SVGSVGElement>) => {
