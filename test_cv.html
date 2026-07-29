@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<body>
+<img id="myimg" src="/tmp/file_attachments/image.png" style="max-width: 100px;" onload="onLoad()" />
+<script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="cvLoaded()"></script>
+<script>
+  let imgLoaded = false, cvReady = false;
+  function onLoad() { imgLoaded = true; check(); }
+  function cvLoaded() { cvReady = true; check(); }
+  function check() {
+    if(imgLoaded && cvReady) {
+      setTimeout(() => {
+        let mat = cv.imread('myimg');
+        console.log("Mat size:", mat.cols, mat.rows);
+        console.log("Img natural size:", document.getElementById('myimg').naturalWidth, document.getElementById('myimg').naturalHeight);
+        console.log("Img client size:", document.getElementById('myimg').clientWidth, document.getElementById('myimg').clientHeight);
+      }, 500);
+    }
+  }
+</script>
+</body>
+</html>

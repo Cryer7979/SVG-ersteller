@@ -40,30 +40,46 @@ export function App() {
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
     setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
-    setDisplaySize({ width: img.width, height: img.height });
+    setDisplaySize({ width: img.clientWidth, height: img.clientHeight });
   };
 
   useEffect(() => {
     // Update display size if window resizes
     const handleResize = () => {
        if (imageRef.current) {
-          setDisplaySize({ width: imageRef.current.width, height: imageRef.current.height });
+          setDisplaySize({ width: imageRef.current.clientWidth, height: imageRef.current.clientHeight });
        }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Since OpenCV reads from img element and scales it using its CSS width/height,
+  // the coordinates from OpenCV are relative to img.clientWidth x img.clientHeight
+  // but WITHOUT maintaining aspect ratio in its internal buffer (it stretches).
+  // So OpenCV points are within 0 to clientWidth and 0 to clientHeight.
+  // Wait, OpenCV's imread reads the stretched image drawn by canvas ctx.drawImage(img, 0, 0, width, height)
+  // Our visual image is displayed with object-contain.
+  // We need to map from OpenCV coordinates to visual coordinates.
+  // Actually, wait, when we map OpenCV points to display points, what do we need?
+  // Let's standardize everything to natural image size immediately when they come out of autoDetect!
+
   const getRenderedImageRect = () => {
     if (!imageRef.current || imageSize.width === 0 || imageSize.height === 0) {
       return { x: 0, y: 0, width: displaySize.width, height: displaySize.height };
     }
     const img = imageRef.current;
-    const scale = Math.min(img.width / imageSize.width, img.height / imageSize.height);
+    const clientWidth = img.clientWidth;
+    const clientHeight = img.clientHeight;
+
+    const scale = Math.min(clientWidth / imageSize.width, clientHeight / imageSize.height);
     const renderedWidth = imageSize.width * scale;
     const renderedHeight = imageSize.height * scale;
-    const offsetX = (img.width - renderedWidth) / 2;
-    const offsetY = (img.height - renderedHeight) / 2;
+
+    // For object-contain, the image is centered
+    const offsetX = (clientWidth - renderedWidth) / 2;
+    const offsetY = (clientHeight - renderedHeight) / 2;
+
     return { x: offsetX, y: offsetY, width: renderedWidth, height: renderedHeight };
   };
 
@@ -138,8 +154,26 @@ export function App() {
     const detectedPoints = detectContours(imageRef.current, sensitivity, addLog);
     if (detectedPoints) {
        let finalPoints = detectedPoints;
+
+       // Map points from OpenCV space (img.clientWidth x img.clientHeight, stretched)
+       // back to natural image space.
+       const cw = imageRef.current.clientWidth;
+       const ch = imageRef.current.clientHeight;
+       const nw = imageRef.current.naturalWidth;
+       const nh = imageRef.current.naturalHeight;
+
+       if (cw > 0 && ch > 0) {
+         finalPoints = finalPoints.map(p => ({
+            x: (p.x / cw) * nw,
+            y: (p.y / ch) * nh
+         }));
+       }
+
        if (offsetAmount > 0) {
-           finalPoints = offsetPolygon(finalPoints, offsetAmount);
+           // offset needs to be scaled to image natural size or keep it in some generic unit?
+           // The user thinks in display pixels. So scale offset to natural image scale.
+           const displayToNaturalScale = nw / cw;
+           finalPoints = offsetPolygon(finalPoints, offsetAmount * displayToNaturalScale);
            addLog(`Applied offset of ${offsetAmount}px`);
        }
        setPoints(finalPoints);
