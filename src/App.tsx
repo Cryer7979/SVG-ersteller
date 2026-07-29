@@ -17,6 +17,9 @@ export function App() {
   const [offsetAmount, setOffsetAmount] = useState(5);
   const [thickness, setThickness] = useState(3.0);
 
+  const [targetFormat, setTargetFormat] = useState('A4');
+  const [customWidthMm, setCustomWidthMm] = useState(210);
+
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [showDebug, setShowDebug] = useState(false);
 
@@ -98,6 +101,21 @@ export function App() {
       y: (p.y / imageSize.height) * rect.height + rect.y
     };
   };
+
+  const getPhysicalWidthMm = () => {
+    const isLandscape = imageSize.width > imageSize.height;
+    switch (targetFormat) {
+       case 'A5': return isLandscape ? 210 : 148;
+       case 'A4': return isLandscape ? 297 : 210;
+       case 'A3': return isLandscape ? 420 : 297;
+       case 'A2': return isLandscape ? 594 : 420;
+       case 'A1': return isLandscape ? 841 : 594;
+       case 'Custom': return customWidthMm;
+       default: return 210;
+    }
+  };
+
+  const scaleFactor = imageSize.width > 0 ? getPhysicalWidthMm() / imageSize.width : 1;
 
   const handleSvgClick = (e: MouseEvent<SVGSVGElement>) => {
     if (draggingPointIdx !== null) return; // Ignore click if we were dragging
@@ -243,10 +261,46 @@ export function App() {
                 </button>
               </div>
 
+              {/* Scale Settings */}
+              <div className="space-y-4">
+                <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2">
+                  <Box className="w-4 h-4" /> 3. Physical Scale
+                </h2>
+
+                <div className="space-y-2">
+                   <label className="text-sm text-gray-600 block">Image Real-World Size</label>
+                   <select
+                     value={targetFormat}
+                     onChange={e => setTargetFormat(e.target.value)}
+                     className="w-full border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm py-2 px-3 bg-white"
+                   >
+                     <option value="A5">DIN A5 (148 x 210 mm)</option>
+                     <option value="A4">DIN A4 (210 x 297 mm)</option>
+                     <option value="A3">DIN A3 (297 x 420 mm)</option>
+                     <option value="A2">DIN A2 (420 x 594 mm)</option>
+                     <option value="A1">DIN A1 (594 x 841 mm)</option>
+                     <option value="Custom">Custom Width</option>
+                   </select>
+                </div>
+
+                {targetFormat === 'Custom' && (
+                  <div className="space-y-2">
+                     <label className="text-sm text-gray-600 block">Custom Width (mm)</label>
+                     <input
+                       type="number"
+                       min="1"
+                       value={customWidthMm}
+                       onChange={e => setCustomWidthMm(Number(e.target.value))}
+                       className="w-full border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm py-2 px-3 bg-white"
+                     />
+                  </div>
+                )}
+              </div>
+
               {/* 3D Settings */}
               <div className="space-y-4">
                 <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center gap-2">
-                  <Box className="w-4 h-4" /> 3. 3D Properties
+                  <Box className="w-4 h-4" /> 4. 3D Properties
                 </h2>
 
                 <div className="space-y-2">
@@ -265,14 +319,20 @@ export function App() {
         <div className="p-6 border-t border-gray-200 bg-gray-50 space-y-3">
            <button
               disabled={!imageSrc || points.length < 3}
-              onClick={() => exportToSVG(points, getSmoothPath(points, true))}
+              onClick={() => {
+                const scaledPoints = points.map(p => ({ x: p.x * scaleFactor, y: p.y * scaleFactor }));
+                exportToSVG(scaledPoints, getSmoothPath(scaledPoints, true));
+              }}
               className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-gray-800 hover:bg-gray-900 text-white rounded-md font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
            >
               <Download className="w-4 h-4" /> Export SVG (2D)
            </button>
            <button
               disabled={!imageSrc || points.length < 3}
-              onClick={() => exportToSTL(points, thickness)}
+              onClick={() => {
+                const scaledPoints = points.map(p => ({ x: p.x * scaleFactor, y: p.y * scaleFactor }));
+                exportToSTL(scaledPoints, thickness);
+              }}
               className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
            >
               <Download className="w-4 h-4" /> Export STL (3D)
@@ -375,7 +435,7 @@ export function App() {
            ) : (
              <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
                 {imageSrc ? (
-                   <Preview3D points={points} thickness={thickness} />
+                   <Preview3D points={points.map(p => ({ x: p.x * scaleFactor, y: p.y * scaleFactor }))} thickness={thickness} />
                 ) : (
                    <p className="text-gray-500">Upload an image first.</p>
                 )}
